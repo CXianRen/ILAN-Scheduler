@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20.0)
 set(LLVM_SUBPROJECT_TITLE "OpenMP")
 
 set(LLVM_COMMON_CMAKE_UTILS ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Add path for custom modules
 list(INSERT CMAKE_MODULE_PATH 0
@@ -16,6 +17,13 @@ if (OPENMP_STANDALONE_BUILD OR "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_S
 else()
   set(OPENMP_STANDALONE_BUILD FALSE)
 endif()
+
+# ILAN
+add_definitions(-DPERF_COUNTERS)
+# add_definitions(-DAMD_PERF)
+add_definitions(-DMOLDABILITY)
+add_definitions(-DLOADBALANCE)
+# ILAN END
 
 # Must go below project(..)
 include(GNUInstallDirs)

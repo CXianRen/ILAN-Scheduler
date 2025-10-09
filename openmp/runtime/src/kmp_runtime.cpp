@@ -21,6 +21,9 @@
 #include "kmp_settings.h"
 #include "kmp_stats.h"
 #include "kmp_str.h"
+// ILAN - START
+#include "kmp_ilan_topo.h"
+// ILAN - END
 #include "kmp_wait_release.h"
 #include "kmp_wrapper_getpid.h"
 #include "kmp_dispatch.h"
@@ -28,6 +31,12 @@
 #if KMP_USE_HIER_SCHED
 #include "kmp_dispatch_hier.h"
 #endif
+
+// ILAN
+#ifdef PERF_COUNTERS
+#include "kmp_ilan_perf.h"
+#endif
+// ILAN END
 
 #if OMPT_SUPPORT
 #include "ompt-specific.h"
@@ -584,9 +593,7 @@ static void __kmp_fini_allocator() { __kmp_fini_memkind(); }
 /* ------------------------------------------------------------------------ */
 
 #if ENABLE_LIBOMPTARGET
-static void __kmp_init_omptarget() {
-  __kmp_init_target_task();
-}
+static void __kmp_init_omptarget() { __kmp_init_target_task(); }
 #endif
 
 /* ------------------------------------------------------------------------ */
@@ -1539,7 +1546,7 @@ __kmp_fork_in_teams(ident_t *loc, int gtid, kmp_team_t *parent_team,
                              ,
                              exit_frame_p
 #endif
-                             );
+      );
     }
 
 #if OMPT_SUPPORT
@@ -1735,7 +1742,7 @@ __kmp_serial_fork_call(ident_t *loc, int gtid, enum fork_context_e call_context,
     if (!ap) {
       // revert change made in __kmpc_serialized_parallel()
       master_th->th.th_serial_team->t.t_level--;
-// Get args from parent team for teams construct
+      // Get args from parent team for teams construct
 
 #if OMPT_SUPPORT
       void *dummy;
@@ -1774,7 +1781,7 @@ __kmp_serial_fork_call(ident_t *loc, int gtid, enum fork_context_e call_context,
                                ,
                                exit_frame_p
 #endif
-                               );
+        );
       }
 
 #if OMPT_SUPPORT
@@ -1873,7 +1880,7 @@ __kmp_serial_fork_call(ident_t *loc, int gtid, enum fork_context_e call_context,
                                ,
                                exit_frame_p
 #endif
-                               );
+        );
       }
 
 #if OMPT_SUPPORT
@@ -3302,29 +3309,29 @@ static kmp_internal_control_t __kmp_get_global_icvs(void) {
   KMP_DEBUG_ASSERT(__kmp_nested_proc_bind.used > 0);
 
   kmp_internal_control_t g_icvs = {
-    0, // int serial_nesting_level; //corresponds to value of th_team_serialized
-    (kmp_int8)__kmp_global.g.g_dynamic, // internal control for dynamic
-    // adjustment of threads (per thread)
-    (kmp_int8)__kmp_env_blocktime, // int bt_set; //internal control for
-    // whether blocktime is explicitly set
-    __kmp_dflt_blocktime, // int blocktime; //internal control for blocktime
+      0, // int serial_nesting_level; //corresponds to value of th_team_serialized
+      (kmp_int8)__kmp_global.g.g_dynamic, // internal control for dynamic
+      // adjustment of threads (per thread)
+      (kmp_int8)__kmp_env_blocktime, // int bt_set; //internal control for
+      // whether blocktime is explicitly set
+      __kmp_dflt_blocktime, // int blocktime; //internal control for blocktime
 #if KMP_USE_MONITOR
-    __kmp_bt_intervals, // int bt_intervals; //internal control for blocktime
+      __kmp_bt_intervals, // int bt_intervals; //internal control for blocktime
 // intervals
 #endif
-    __kmp_dflt_team_nth, // int nproc; //internal control for # of threads for
-    // next parallel region (per thread)
-    // (use a max ub on value if __kmp_parallel_initialize not called yet)
-    __kmp_cg_max_nth, // int thread_limit;
-    __kmp_task_max_nth, // int task_thread_limit; // to set the thread_limit
-    // on task. This is used in the case of target thread_limit
-    __kmp_dflt_max_active_levels, // int max_active_levels; //internal control
-    // for max_active_levels
-    r_sched, // kmp_r_sched_t sched; //internal control for runtime schedule
-    // {sched,chunk} pair
-    __kmp_nested_proc_bind.bind_types[0],
-    __kmp_default_device,
-    NULL // struct kmp_internal_control *next;
+      __kmp_dflt_team_nth, // int nproc; //internal control for # of threads for
+      // next parallel region (per thread)
+      // (use a max ub on value if __kmp_parallel_initialize not called yet)
+      __kmp_cg_max_nth, // int thread_limit;
+      __kmp_task_max_nth, // int task_thread_limit; // to set the thread_limit
+      // on task. This is used in the case of target thread_limit
+      __kmp_dflt_max_active_levels, // int max_active_levels; //internal control
+      // for max_active_levels
+      r_sched, // kmp_r_sched_t sched; //internal control for runtime schedule
+      // {sched,chunk} pair
+      __kmp_nested_proc_bind.bind_types[0],
+      __kmp_default_device,
+      NULL // struct kmp_internal_control *next;
   };
 
   return g_icvs;
@@ -4426,7 +4433,7 @@ kmp_info_t *__kmp_allocate_thread(kmp_root_t *root, kmp_team_t *team,
   kmp_info_t *new_thr;
   int new_gtid;
 
-  KA_TRACE(20, ("__kmp_allocate_thread: T#%d\n", __kmp_get_gtid()));
+  KA_TRACE(5, ("__kmp_allocate_thread: T#%d\n", __kmp_get_gtid()));
   KMP_DEBUG_ASSERT(root && team);
 #if !KMP_NESTED_HOT_TEAMS
   KMP_DEBUG_ASSERT(KMP_MASTER_GTID(__kmp_get_gtid()));
@@ -4699,6 +4706,8 @@ kmp_info_t *__kmp_allocate_thread(kmp_root_t *root, kmp_team_t *team,
 #endif /* KMP_ADJUST_BLOCKTIME */
 
 #if KMP_AFFINITY_SUPPORTED
+  // KA_TRACE(1, ("__kmp_allocate_thread: T#%d set affinity for T#%d\n",
+  //               __kmp_get_gtid(), new_gtid));
   // Set the affinity and topology information for new thread
   __kmp_affinity_set_init_mask(new_gtid, /*isa_root=*/FALSE);
 #endif
@@ -4801,6 +4810,15 @@ static inline void __kmp_set_thread_place(kmp_team_t *team, kmp_info_t *th,
   th->th.th_first_place = first;
   th->th.th_last_place = last;
   th->th.th_new_place = newp;
+
+  int os_id = __kmp_topology->at(th->th.th_new_place).os_id;
+
+  ILAN::__kmp_ilan_topology().register_gtid_os_id_map(
+      __kmp_gtid_from_thread(th), os_id);
+  KA_TRACE(2, ("__kmp_set_thread_place: T#%d(%d:%d) set OS id %d\n",
+                 __kmp_gtid_from_thread(th), team->t.t_id,
+                 th->th.th_info.ds.ds_tid, os_id));
+
   if (newp != th->th.th_current_place) {
     if (__kmp_display_affinity && team->t.t_display_affinity != 1)
       team->t.t_display_affinity = 1;
@@ -5400,12 +5418,12 @@ __kmp_allocate_team(kmp_root_t *root, int new_nproc, int max_nproc,
           KMP_DEBUG_ASSERT(new_worker);
           team->t.t_threads[f] = new_worker;
 
-          KA_TRACE(20,
-                   ("__kmp_allocate_team: team %d init T#%d arrived: "
-                    "join=%llu, plain=%llu\n",
-                    team->t.t_id, __kmp_gtid_from_tid(f, team), team->t.t_id, f,
-                    team->t.t_bar[bs_forkjoin_barrier].b_arrived,
-                    team->t.t_bar[bs_plain_barrier].b_arrived));
+          KA_TRACE(5, 
+            ("__kmp_allocate_team: team %d init T#%d arrived: "
+                       "join=%llu, plain=%llu\n",
+                       team->t.t_id, __kmp_gtid_from_tid(f, team), team->t.t_id, f, 
+                       team->t.t_bar[bs_forkjoin_barrier].b_arrived,
+                       team->t.t_bar[bs_plain_barrier].b_arrived));
 
           { // Initialize barrier data for new threads.
             int b;
@@ -6017,7 +6035,15 @@ void *__kmp_launch_thread(kmp_info_t *this_thr) {
   kmp_team_t **volatile pteam;
 
   KMP_MB();
-  KA_TRACE(10, ("__kmp_launch_thread: T#%d start\n", gtid));
+  KA_TRACE(3, ("__kmp_launch_thread: T#%d start\n", gtid));
+
+// moved down to after barrier initialization by @hongguang
+// // ILAN
+// #ifdef PERF_COUNTERS
+//   // Open file descriptors for all perf events for this thread
+//   Perf::__kmp_ilan_init_counters(this_thr, gtid);
+// #endif
+// // ILAN END
 
   if (__kmp_env_consistency_check) {
     this_thr->th.th_cons = __kmp_allocate_cons_stack(gtid); // ATT: Memory leak?
@@ -6052,7 +6078,7 @@ void *__kmp_launch_thread(kmp_info_t *this_thr) {
     KMP_MB();
 
     /* wait for work to do */
-    KA_TRACE(20, ("__kmp_launch_thread: T#%d waiting for work\n", gtid));
+    KA_TRACE(3, ("__kmp_launch_thread: T#%d waiting for work\n", gtid));
 
     /* No tid yet since not part of a team */
     __kmp_fork_barrier(gtid, KMP_GTID_DNE);
@@ -6062,6 +6088,22 @@ void *__kmp_launch_thread(kmp_info_t *this_thr) {
       this_thr->th.ompt_thread_info.state = ompt_state_overhead;
     }
 #endif
+
+// ILAN - START
+// Initialize perf counters AFTER first fork barrier
+// At this point, the thread should be bound to a specific core
+#ifdef PERF_COUNTERS
+    // Only initialize once
+    static thread_local bool perf_initialized = false;
+    if (!perf_initialized && this_thr->th.th_team != nullptr) {
+      // Wait a bit to ensure affinity is set
+      KMP_CPU_PAUSE();
+      Perf::__kmp_ilan_init_counters(this_thr, gtid);
+      perf_initialized = true;
+      // KA_TRACE(1, ("__kmp_launch_thread: T#%d perf counters initialized after binding\n", gtid));
+    }
+#endif
+// ILAN - END
 
     pteam = &this_thr->th.th_team;
 
@@ -6115,11 +6157,18 @@ void *__kmp_launch_thread(kmp_info_t *this_thr) {
   }
 #endif
 
+// ILAN
+#ifdef PERF_COUNTERS
+  // Close all file descriptors for perf events for this thread
+  Perf::__kmp_ilan_deinit_counters(this_thr);
+#endif
+  // ILAN END
+
   this_thr->th.th_task_team = NULL;
   /* run the destructors for the threadprivate data for this thread */
   __kmp_common_destroy_gtid(gtid);
 
-  KA_TRACE(10, ("__kmp_launch_thread: T#%d done\n", gtid));
+  KA_TRACE(2, ("__kmp_launch_thread: T#%d done, destroying thread.\n", gtid));
   KMP_MB();
 
 #if OMP_PROFILING_SUPPORT
@@ -6154,6 +6203,19 @@ __attribute__((destructor)) void __kmp_internal_end_dtor(void) {
    than one thread alive */
 void __kmp_internal_end_atexit(void) {
   KA_TRACE(30, ("__kmp_internal_end_atexit\n"));
+
+// ILAN
+#ifdef PERF_COUNTERS
+  int gtid = __kmp_get_gtid();
+
+  // Close all file descriptors for perf events for this thread
+  // This is only executed by the master thread
+  if (gtid >= 0) {
+    Perf::__kmp_ilan_deinit_counters(__kmp_thread_from_gtid(gtid));
+  }
+#endif
+  // ILAN END
+
   /* [Windows]
      josh: ideally, we want to completely shutdown the library in this atexit
      handler, but stat code that depends on thread specific data for gtid fails
@@ -7432,6 +7494,41 @@ static void __kmp_do_middle_initialize(void) {
   __kmp_affinity_initialize(__kmp_affinity);
 
 #endif /* KMP_AFFINITY_SUPPORTED */
+// ILAN
+
+#ifdef KMP_AFFINITY_SUPPORTED
+#pragma message "[ILAN]: AFFINITY SUPPORTED"
+KA_TRACE(5, ("__kmp_do_middle_initialize: ILAN : Affinity initialized\n"));
+#endif
+
+#ifdef MOLDABILITY
+#pragma message "[ILAN]: MOLDABILITY ENABLED"
+KA_TRACE(5, ("__kmp_do_middle_initialize: ILAN : Moldability enabled\n"));
+#endif
+
+#ifdef PERF_COUNTERS
+#pragma message "[ILAN]: PERF COUNTERS ENABLED"
+KA_TRACE(5, ("__kmp_do_middle_initialize: ILAN : Perf counters enabled\n"));
+#endif 
+
+#ifdef AMD_PERF
+#pragma message "[ILAN]: device: AMD, AMD PERF ENABLED"
+KA_TRACE(5, ("__kmp_do_middle_initialize: ILAN : AMD PERF ENABLED\n"));
+#endif
+ 
+// moved to __kmp_parallel_initialize by @hongguang
+// #ifdef PERF_COUNTERS
+//   int gtid = __kmp_entry_gtid(); // this might be a new root
+
+//   KA_TRACE(5, ("__kmp_do_middle_initialize: Initializing perf events, T#%d\n",
+//                gtid));
+//   // Open file descriptors for all perf events for the master thread
+//   // (All other threads will run init_counters from __kmp_launch_thread() )
+//   Perf::__kmp_ilan_init_counters(__kmp_thread_from_gtid(gtid), gtid);
+//   // ILAN::__kmp_ilan_topology().showTopo();
+// #endif
+
+// ILAN END
 
   KMP_ASSERT(__kmp_xproc > 0);
   if (__kmp_avail_proc == 0) {
@@ -7558,6 +7655,35 @@ void __kmp_parallel_initialize(void) {
   /* begin initialization */
   KA_TRACE(10, ("__kmp_parallel_initialize: enter\n"));
   KMP_ASSERT(KMP_UBER_GTID(gtid));
+
+  // ILAN - Initialize perf counters for root thread AFTER affinity is set
+  // after this step, the root thread is fully initialized and binded
+
+  // register the gtid and cpu mask
+  KMP_ASSERT(gtid == 0); // root thread must have gtid 0
+  auto root_thread = __kmp_threads[gtid];
+  
+  int os_id = __kmp_topology->at(root_thread->th.th_current_place).os_id;
+  ILAN::__kmp_ilan_topology().register_gtid_os_id_map(gtid, os_id);
+
+  KA_TRACE(1, ("__kmp_parallel_initialize: ILAN : Registered root T#%d to CPU %d\n", gtid, os_id));
+
+#ifdef PERF_COUNTERS
+  static bool root_perf_initialized = false;
+  
+  if (!root_perf_initialized) {
+    // Ensure affinity mask is set before initializing perf counters
+    if (root_thread->th.th_affin_mask != NULL) {
+      // Wait a moment to ensure binding is complete
+      KMP_CPU_PAUSE(); // is this needed?
+      Perf::__kmp_ilan_init_counters(root_thread, gtid);
+      root_perf_initialized = true;
+      // KA_TRACE(5, ("__kmp_parallel_initialize: T#%d (root) perf counters initialized\n", gtid));
+    }
+  }
+#endif
+// ILAN END
+
 
 #if KMP_ARCH_X86 || KMP_ARCH_X86_64
   // Save the FP control regs.

@@ -124,6 +124,15 @@ class kmp_stats_list;
 #define KMP_INTERNAL_REALLOC(p, sz) realloc((p), (sz))
 #define KMP_INTERNAL_CALLOC(n, sz) calloc((n), (sz))
 
+// ILAN - START
+#ifdef PERF_COUNTERS
+#include "kmp_ilan_perf.h"
+#ifdef AMD_PERF
+#include "kmp_ilan_perf_objects.h"
+#endif
+#endif
+// ILAN - END
+
 #include "kmp_debug.h"
 #include "kmp_lock.h"
 #include "kmp_version.h"
@@ -940,10 +949,10 @@ typedef struct kmp_affinity_t {
 #define KMP_AFFINITY_INIT(env)                                                 \
   {                                                                            \
     nullptr, affinity_default, KMP_HW_UNKNOWN, -1, KMP_AFFINITY_ATTRS_UNKNOWN, \
-        0, 0,                                                                  \
-        {TRUE,  FALSE, TRUE, affinity_respect_mask_default, FALSE, FALSE,      \
-         FALSE, FALSE, FALSE},                                                 \
-        0, nullptr, nullptr, nullptr, 0, nullptr, env                          \
+   0, 0,                                                                  \
+   {TRUE,  FALSE, TRUE, affinity_respect_mask_default, FALSE, FALSE,      \
+    FALSE, FALSE, FALSE},                                                 \
+   0, nullptr, nullptr, nullptr, 0, nullptr, env                          \
   }
 
 extern enum affinity_top_method __kmp_affinity_top_method;
@@ -2755,6 +2764,14 @@ typedef struct kmp_target_data {
 struct kmp_taskdata { /* aligned during dynamic allocation       */
   kmp_int32 td_task_id; /* id, assigned by debugger                */
   kmp_tasking_flags_t td_flags; /* task flags                              */
+  // ILAN - START
+  // which numa node's thread can steal this task
+  kmp_uint16 td_affin_mask; /* Steal policy for task 1 bit per NUMA node */
+  // which thread's queue to place this task in (for distribution)
+  kmp_uint8 td_task_place_tid; /* Distribution place for task */
+  kmp_uint8 td_task_place_numa_id; /* NUMA node for task placement */
+  kmp_uint16 td_available_steal; /* Available steal mask for this taskdata's routine */
+  // ILAN - END
   kmp_team_t *td_team; /* team for this task                      */
   kmp_info_p *td_alloc_thread; /* thread that allocated data structures   */
   /* Currently not used except for perhaps IDB */
@@ -3032,6 +3049,37 @@ typedef struct KMP_ALIGN_CACHE kmp_base_info {
   kmp_uint8 th_task_state; // alternating 0/1 for task team identification
   kmp_uint32 th_reap_state; // Non-zero indicates thread is not
   // tasking, thus safe to reap
+
+  // ILAN - START
+#ifdef PERF_COUNTERS
+  // Perf counters for one task.
+  // Resets when the task is finished.
+  kmp_int32 perf_stats[NUM_PERF_EVENTS];
+  kmp_real64 time;
+
+  // Perf counters accumulated for all tasks running on a thread.
+  // Resets when the taskloop is finished.
+  kmp_uint64 perf_accum[NUM_PERF_EVENTS];
+
+#ifdef AMD_PERF
+  // Container for RAW perf events
+  RawAMDPerfContainer perf_container;
+#endif
+#endif
+  kmp_real64 task_finish_time;
+  // Routine id
+  kmp_int64 routine_id;
+
+  // Schedule parameters
+  kmp_uint16 steal_mask;
+  kmp_uint32 numa_head_start; // First task index for current taskloop
+  kmp_int8
+      has_execed_on_self; // Flag ensuring threads start within their NUMA node
+
+#if KMP_AFFINITY_SUPPORTED
+  kmp_int8 force_affin;
+#endif
+  // ILAN - END
 
   /* More stuff for keeping track of active/sleeping threads (this part is
      written by the worker thread) */

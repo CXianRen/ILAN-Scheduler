@@ -12,6 +12,9 @@
 
 #include "kmp.h"
 #include "kmp_affinity.h"
+// ILAN - START
+#include "kmp_ilan_schedule.h"
+// ILAN - END
 #include "kmp_i18n.h"
 #include "kmp_io.h"
 #include "kmp_str.h"
@@ -1893,14 +1896,19 @@ static bool __kmp_affinity_create_hwloc_map(kmp_i18n_id_t *const msg_id) {
 
   // Allocate the data structure to be returned.
   __kmp_topology = kmp_topology_t::allocate(__kmp_avail_proc, depth, types);
+  // KA_TRACE(1,
+  //          ("__kmp_affinity_create_hwloc_map: allocated topology witth: %d avail "
+  //           "procs and depth %d\n",
+  //           __kmp_avail_proc, depth));
 
   hw_thread_index = 0;
   pu = NULL;
   while ((pu = hwloc_get_next_obj_by_type(tp, HWLOC_OBJ_PU, pu))) {
     int index = depth - 1;
     bool included = KMP_CPU_ISSET(pu->os_index, __kmp_affin_fullMask);
-    kmp_hw_thread_t &hw_thread = __kmp_topology->at(hw_thread_index);
+    // KA_TRACE(1, ("PU os_index %d , included %d\n", pu->os_index, included));
     if (included) {
+      kmp_hw_thread_t &hw_thread = __kmp_topology->at(hw_thread_index);
       hw_thread.clear();
       hw_thread.ids[index] = pu->logical_index;
       hw_thread.os_id = pu->os_index;
@@ -1940,6 +1948,7 @@ static bool __kmp_affinity_create_hwloc_map(kmp_i18n_id_t *const msg_id) {
         if (memory && memory->type == HWLOC_OBJ_NUMANODE) {
           sub_id = __kmp_hwloc_get_sub_id(tp, memory, prev);
           if (included) {
+            kmp_hw_thread_t &hw_thread = __kmp_topology->at(hw_thread_index);
             hw_thread.ids[index] = memory->logical_index;
             hw_thread.ids[index + 1] = sub_id;
             index--;
@@ -1953,6 +1962,7 @@ static bool __kmp_affinity_create_hwloc_map(kmp_i18n_id_t *const msg_id) {
       if (type != KMP_HW_UNKNOWN) {
         sub_id = __kmp_hwloc_get_sub_id(tp, obj, prev);
         if (included) {
+          kmp_hw_thread_t &hw_thread = __kmp_topology->at(hw_thread_index);
           hw_thread.ids[index] = obj->logical_index;
           hw_thread.ids[index + 1] = sub_id;
           index--;
@@ -4936,6 +4946,12 @@ void __kmp_affinity_initialize(kmp_affinity_t &affinity) {
   __kmp_aux_affinity_initialize(affinity);
   if (disabled)
     affinity.type = affinity_disabled;
+  // ILAN
+  KA_TRACE(1, ("__kmp_affinity_initialize: dumping topology\n"));
+  // __kmp_topology->dump();
+
+  ILAN::__kmp_ilan_sync_affinity_topology(&affinity, __kmp_topology);
+  // ILAN END
 }
 
 void __kmp_affinity_uninitialize(void) {
@@ -5022,8 +5038,12 @@ void __kmp_affinity_set_init_mask(int gtid, int isa_root) {
 
   if (th->th.th_affin_mask == NULL) {
     KMP_CPU_ALLOC(th->th.th_affin_mask);
+    //  KA_TRACE(1, ("__kmp_affinity_set_init_mask: allocating mask for T#%d\n",
+    //                gtid));
   } else {
     KMP_CPU_ZERO(th->th.th_affin_mask);
+    // KA_TRACE(1, ("__kmp_affinity_set_init_mask: reusing mask for T#%d\n",
+    //              gtid));
   }
 
   // Copy the thread mask to the kmp_info_t structure. If
@@ -5041,6 +5061,11 @@ void __kmp_affinity_set_init_mask(int gtid, int isa_root) {
   else
     affinity = &__kmp_affinity;
 
+  // ILAN
+  // Schedule::__kmp_set_per_thread_affinity(th, gtid);
+  // return;
+  // ILAN END
+
   if (KMP_AFFINITY_NON_PROC_BIND || is_hidden_helper) {
     if ((affinity->type == affinity_none) ||
         (affinity->type == affinity_balanced) ||
@@ -5054,19 +5079,23 @@ void __kmp_affinity_set_init_mask(int gtid, int isa_root) {
       i = 0;
       mask = __kmp_affin_fullMask;
     } else {
+      KA_TRACE(1, ("__kmp_affinity_set_init_mask 1: selecting mask for T#%d\n",
+                   gtid));
       __kmp_select_mask_by_gtid(gtid, affinity, &i, &mask);
     }
   } else {
     if (!isa_root || __kmp_nested_proc_bind.bind_types[0] == proc_bind_false) {
-#if KMP_GROUP_AFFINITY
-      if (__kmp_num_proc_groups > 1) {
-        return;
-      }
-#endif
+  #if KMP_GROUP_AFFINITY
+        if (__kmp_num_proc_groups > 1) {
+          return;
+        }
+  #endif
       KMP_ASSERT(__kmp_affin_fullMask != NULL);
       i = KMP_PLACE_ALL;
       mask = __kmp_affin_fullMask;
     } else {
+      KA_TRACE(1, ("__kmp_affinity_set_init_mask 2: selecting mask for T#%d\n",
+                   gtid));
       __kmp_select_mask_by_gtid(gtid, affinity, &i, &mask);
     }
   }
@@ -5115,8 +5144,8 @@ void __kmp_affinity_bind_init_mask(int gtid) {
   env_var = __kmp_get_affinity_env_var(*affinity, /*for_binding=*/true);
   /* to avoid duplicate printing (will be correctly printed on barrier) */
   if (affinity->flags.verbose && (affinity->type == affinity_none ||
-                                  (th->th.th_current_place != KMP_PLACE_ALL &&
-                                   affinity->type != affinity_balanced)) &&
+       (th->th.th_current_place != KMP_PLACE_ALL &&
+        affinity->type != affinity_balanced)) &&
       !KMP_HIDDEN_HELPER_MAIN_THREAD(gtid)) {
     char buf[KMP_AFFIN_MASK_PRINT_LEN];
     __kmp_affinity_print_mask(buf, KMP_AFFIN_MASK_PRINT_LEN,
@@ -5146,6 +5175,22 @@ void __kmp_affinity_bind_place(int gtid) {
   }
 
   kmp_info_t *th = (kmp_info_t *)TCR_SYNC_PTR(__kmp_threads[gtid]);
+
+  // ILAN - START
+
+  KA_TRACE(2, ("__kmp_affinity_bind_place: T#%d current place = %d, new "
+              "place = %d force_affin = %d, last place = %d first place = %d\n",
+               gtid, th->th.th_current_place, th->th.th_new_place, th->th.force_affin,
+               th->th.th_last_place, th->th.th_first_place));
+  
+  // moved by @hongguang, now affinity is set by omp itself
+  // ILAN won't set it forcely
+
+  // Affinity is already setup
+  // if (th->th.force_affin == 1) {
+  //   return;
+  // }
+  // ILAN - END
 
   KA_TRACE(100, ("__kmp_affinity_bind_place: binding T#%d to place %d (current "
                  "place = %d)\n",
@@ -5178,6 +5223,20 @@ void __kmp_affinity_bind_place(int gtid) {
                __kmp_gettid(), gtid, buf);
   }
   __kmp_set_system_affinity(th->th.th_affin_mask, TRUE);
+
+  // ILAN - START
+  // get the numa id of the current place
+  {
+    // @hongguang move to in which thread starts
+    int global_numa_id = ILAN::__kmp_ilan_topology().get_numa_id(gtid);
+    
+    th->th.steal_mask =
+       (1U << global_numa_id) |
+       static_cast<kmp_uint16>(StealPolicy::FULL); // All threads can steal tasks
+                                                   // with load balance bit
+  }
+  // ILAN - END
+
 }
 
 int __kmp_aux_set_affinity(void **mask) {

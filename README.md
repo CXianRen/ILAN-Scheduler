@@ -1,44 +1,46 @@
-# The LLVM Compiler Infrastructure
+# ILAN - The Interference- and Locality-Aware NUMA Scheduler
+This repository is a fork of the official [LLVM project](https://github.com/llvm/llvm-project). It extends the OpenMP runtime, specifically taskloop constructs, to incorporate interference and data locality awareness for NUMA platforms. Refer to [README_LLVM](README_LLVM.md) for the original README.
 
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/llvm/llvm-project/badge)](https://securityscorecards.dev/viewer/?uri=github.com/llvm/llvm-project)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8273/badge)](https://www.bestpractices.dev/projects/8273)
-[![libc++](https://github.com/llvm/llvm-project/actions/workflows/libcxx-build-and-test.yaml/badge.svg?branch=main&event=schedule)](https://github.com/llvm/llvm-project/actions/workflows/libcxx-build-and-test.yaml?query=event%3Aschedule)
 
-Welcome to the LLVM project!
+## Core features
+The main features of ILAN are the following:
+- NUMA aware task distribution and stealing.
+- Interference mitigation through moldability.
+- Perf counter tracking on thread granularity.
+These feature are explained in more detail in our master thesis.
 
-This repository contains the source code for LLVM, a toolkit for the
-construction of highly optimized compilers, optimizers, and run-time
-environments.
+### New files and their purpose
+The core features of the ILAN scheduler is split into a couple of new files:
+- **kmp_schedule.cpp and kmp_schedule.h**: The core scheduling decisions are made here. This is what interfaces with the standard runtime in most places.
+- **kmp_routine.cpp and kmp_routine.h**: The optional moldability feature is implemented in this file.
+- **kmp_perf.cpp and kmp_perf.h**: Implements the perf counter tracking functionality. Easily extended with more perf counters.
+- **kmp_perf_objects.cpp and kmp_perf_objects.h**: AMD specific perf counters are grouped into a container in this file.
+- **kmp_topo.cpp and kmp_topo.h**: Reads hardware topology information.
 
-The LLVM project has multiple components. The core of the project is
-itself called "LLVM". This contains all of the tools, libraries, and header
-files needed to process intermediate representations and convert them into
-object files. Tools include an assembler, disassembler, bitcode analyzer, and
-bitcode optimizer.
 
-C-like languages use the [Clang](https://clang.llvm.org/) frontend. This
-component compiles C, C++, Objective-C, and Objective-C++ code into LLVM bitcode
--- and from there into object files, using LLVM.
+## Requirements
+- The current implementation requires `hwloc` during runtime `(apt install libhwloc-dev hwloc)`.
+- Requires processor support for BMI1 (Bit Manipulation Instruction Set 1).
 
-Other components include:
-the [libc++ C++ standard library](https://libcxx.llvm.org),
-the [LLD linker](https://lld.llvm.org), and more.
+## Limitations
+- The scheduler is only verified to work on Linux platforms.
+- No extensive testing has been done on different hardware topologies, which means there is a potential for incorrect behavior on certain hardware.
+- ILAN requires 1-to-1 affinity (same as **OMP_PROC_BIND=true**), and therefore disregards all affinity settings normally used by the OpenMp runtime.
 
-## Getting the Source Code and Building LLVM
 
-Consult the
-[Getting Started with LLVM](https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm)
-page for information on building and running LLVM.
+## Working with limited space
+To limit the space usage of the llvm-project when working primarily with the openmp runtime, you can follow the below steps
+to only clone the necessary folders.
 
-For information on how to contribute to the LLVM project, please take a look at
-the [Contributing to LLVM](https://llvm.org/docs/Contributing.html) guide.
+```sh
+git clone --filter=blob:none --no-checkout --depth 10 <llvm-project-url>
+cd llvm-project
+```
+specify depth that you feel is necessary.
 
-## Getting in touch
-
-Join the [LLVM Discourse forums](https://discourse.llvm.org/), [Discord
-chat](https://discord.gg/xS7Z362),
-[LLVM Office Hours](https://llvm.org/docs/GettingInvolved.html#office-hours) or
-[Regular sync-ups](https://llvm.org/docs/GettingInvolved.html#online-sync-ups).
-
-The LLVM project has adopted a [code of conduct](https://llvm.org/docs/CodeOfConduct.html) for
-participants to all modes of communication within the project.
+Checkout only the folders that are required for the openmp runtime.
+```sh
+git sparse-checkout init --cone
+git sparse-checkout set openmp/ runtimes/ cmake/
+git checkout main
+```
