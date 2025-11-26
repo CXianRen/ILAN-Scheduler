@@ -55,7 +55,7 @@ namespace {
     thread->th.perf_stats[perf_id(ev)] = fd;
 
     if (fd == -1) {
-      KA_TRACE(
+      KB_TRACE(
           1,
           ("%s:%d: __kmp_init_perf_event(ERROR): #T%d = CPU#%d: Cannot open %s\n",
           __FILE_NAME__, __LINE__, __kmp_gtid_from_thread(thread), cpu_id,
@@ -64,7 +64,7 @@ namespace {
       return;
     }
 
-    KA_TRACE(5, ("%s:%d: __kmp_init_perf_event: (E#%d, FD#%d, T#%d, CPU#%d).\n",
+    KB_TRACE(5, ("%s:%d: __kmp_init_perf_event: (E#%d, FD#%d, T#%d, CPU#%d).\n",
                 __FILE_NAME__, __LINE__, ev, fd, __kmp_gtid_from_thread(thread),
                 cpu_id));
   }
@@ -81,7 +81,7 @@ namespace {
 
     uint64_t counter = 0;
     if (read(fd, &counter, sizeof(uint64_t)) == -1) {
-      KA_TRACE(1, ("%s:%d: __kmp_enable_perf_event(ERROR): Reading counter for "
+      KB_TRACE(1, ("%s:%d: __kmp_enable_perf_event(ERROR): Reading counter for "
                   "T#%d. Read fail\n",
                   __FILE_NAME__, __LINE__, gtid));
       perror("Reason: ");
@@ -89,7 +89,7 @@ namespace {
       return;
     }
 
-    KA_TRACE(5, ("%s:%d: __kmp_enable_perf_event: (E#%d, FD#%d, T#%d, CPU#%d)\n",
+    KB_TRACE(5, ("%s:%d: __kmp_enable_perf_event: (E#%d, FD#%d, T#%d, CPU#%d)\n",
                 __FILE_NAME__, __LINE__, ev, fd, gtid, cpu_id));
 
     ioctl(fd, PERF_EVENT_IOC_ENABLE);
@@ -106,7 +106,7 @@ namespace {
 
     uint64_t counter = 0;
     if (read(fd, &counter, sizeof(uint64_t)) == -1) {
-      KA_TRACE(1, ("%s:%d: __kmp_stop_perf_event(ERROR): Reading counter for "
+      KB_TRACE(1, ("%s:%d: __kmp_stop_perf_event(ERROR): Reading counter for "
                   "CPU#%d. Read fail\n",
                   __FILE_NAME__, __LINE__, cpu_id));
       perror("Reason: ");
@@ -115,7 +115,7 @@ namespace {
       return 0;
     }
 
-    KA_TRACE(
+    KB_TRACE(
         5, ("%s:%d: __kmp_stop_perf_event: (E#%d, FD#%d, T#%d, CPU#%d, Val=%d)\n",
             __FILE_NAME__, __LINE__, ev, fd, __kmp_gtid_from_thread(thread),
             cpu_id, counter));
@@ -134,7 +134,7 @@ namespace {
       return;
     }
 
-    KA_TRACE(5, ("%s:%d: __kmp_disable_perf_event: (E#%d, FD#%d, T#%d, CPU#%d)\n",
+    KB_TRACE(5, ("%s:%d: __kmp_disable_perf_event: (E#%d, FD#%d, T#%d, CPU#%d)\n",
                 __FILE_NAME__, __LINE__, ev, fd, __kmp_gtid_from_thread(thread),
                 cpu_id));
 
@@ -162,8 +162,8 @@ void Perf::__kmp_ilan_init_counters(kmp_info_t *thread, int32_t gtid) {
   thread->th.perf_container.initAll();
 #endif
 
-  KA_TRACE(1, ("%s:%d: __kmp_init_counter(entered): T#%d = CPU#%d.\n ",
-               __FILE_NAME__, __LINE__, gtid, cpu_id));
+  KB_TRACE(1, ("__kmp_ilan_init_counters(entered): T#%d = CPU#%d.\n ",
+              gtid, cpu_id));
 
   // Init perf event
   perf_event_attr pe;
@@ -187,6 +187,8 @@ void Perf::__kmp_ilan_deinit_counters(kmp_info_t *thread) {
   disable_perf_event<PerfEvents::TOT_CYCLES>(thread);
   disable_perf_event<PerfEvents::TOT_INSTRUCTIONS>(thread);
 
+  KB_TRACE(1, ("__kmp_ilan_deinit_counters: T#%d.\n ", __kmp_gtid_from_thread(thread)));
+
 #ifdef AMD_PERF
   thread->th.perf_container.disableAll();
 #endif
@@ -202,8 +204,8 @@ void Perf::__kmp_ilan_start_counters(kmp_info_t *thread) {
   int32_t gtid = __kmp_gtid_from_thread(thread);
   int32_t cpu_id = sched_getcpu();
 
-  KA_TRACE(3, ("%s:%d: __kmp_start_counter(entered): T#%d = CPU#%d.\n ",
-               __FILE_NAME__, __LINE__, gtid, cpu_id));
+  KB_TRACE(2, ("__kmp_ilan_start_counters: T#%d = CPU#%d.\n ",
+                gtid, cpu_id));
 
   // Start perf counters and execution time
   __kmp_read_system_time(&thread->th.time);
@@ -240,7 +242,7 @@ void Perf::__kmp_ilan_stop_counters(kmp_info_t *thread, int32_t gtid,
   __kmp_read_system_time(&current_time);
   kmp_real64 elapsed_time = current_time - thread->th.time;
 
-  KA_TRACE(4, ("%s:%d: __kmp_ilan_stop_counters: Counters for Task %p executing "
+  KB_TRACE(2, ("__kmp_ilan_stop_counters: \n\t Counters for Task %p \n\texecuting "
                "routine %p on CPU#%d (T#%d):\n"
                "      - Tot cycles = %ld\n"
                "      - Tot ins = %ld\n"
@@ -258,7 +260,7 @@ void Perf::__kmp_ilan_stop_counters(kmp_info_t *thread, int32_t gtid,
                "      - Backend bound CPU = %lf\n"
 #endif
                "      - Execution time = %f\n",
-               __FILE_NAME__, __LINE__, task_id, thread->th.routine_id, cpu_id,
+               task_id, thread->th.routine_id, cpu_id,
                gtid, tot_cycles, tot_ins
 #ifdef AMD_PERF
                ,
@@ -310,11 +312,13 @@ static void __kmp_ilan_summarize_taskloop_stats(kmp_team *team,
     const auto tot_cyc = thread->th.perf_accum[perf_id(PerfEvents::TOT_CYCLES)];
     
     // if either is zero, skip
+    KB_TRACE(1,
+              ("__kmp_ilan_summarize_taskloop_stats: T#%2d (NUMA#%d): Tot ins = "
+              "%ld, Tot cyc = %ld, IPC = %lf\n",
+              gtid, numa_id, tot_ins, tot_cyc, frac(tot_ins, tot_cyc)));
+
     if (tot_cyc != 0) {
-      KA_TRACE(1,
-                 ("__kmp_summarize_taskloop_stats: T#%2d (NUMA#%d): Tot ins = "
-                  "%ld, Tot cyc = %ld, IPC = %lf\n",
-                  gtid, numa_id, tot_ins, tot_cyc, frac(tot_ins, tot_cyc)));
+     
       IPCs[numa_id] += frac(tot_ins, tot_cyc);
     }
 
@@ -334,6 +338,7 @@ static void __kmp_ilan_summarize_taskloop_stats(kmp_team *team,
   for (kmp_uint32 n = 0; n < num_numa; n++) {
     ipc = 0.0;
     exec_time = 0.0;
+
     if (counts[n] == 0)
     {
       // no thread in this NUMA node
@@ -346,16 +351,16 @@ static void __kmp_ilan_summarize_taskloop_stats(kmp_team *team,
       exec_time = finish_times[n] - taskloop_start_time;
 
       numaSummary.push_back({ipc, exec_time});
-      KA_TRACE(1,
-                 ("__kmp_summarize_taskloop_stats: NUMA node %d has %d threads\n",
-                  n, counts[n]));
     }
 
-    KA_TRACE(1,
-               ("__kmp_summarize_taskloop_stats: NUMA node %d\n"
+    KB_TRACE(1,
+               ("__kmp_ilan_summarize_taskloop_stats[Aggregate]: \n"
+                "  NUMA node %d\n"
+                "  threads: %d\n"
                 "    - IPC: %lf\n"
                 "    - Exec time: %lf\n",
                 n, 
+                counts[n],
                 ipc, 
                 exec_time));
   }

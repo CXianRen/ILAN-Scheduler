@@ -67,6 +67,57 @@ kmp_real64 routine_timer;
 
 } // namespace
 
+
+///
+/// @brief Returns the info about the policy selected for the current routine.
+///
+Schedule::PolicyInfo Schedule::__kmp_get_policy_info(kmp_info *thread,
+                                                     kmp_int64 routine_id) {
+  if (thread->th.th_team_nproc == 1) {
+    // todo:@hongguang: I don't get it.  // ? omp single ? omp master?
+    KD_TRACE(1, ("__kmp_get_policy_info: Single thread, "
+                 "return default policy info: (GENERATION, FULL)\n"));
+    return PolicyInfo(static_cast<kmp_uint16>(StealPolicy::TASK_GENERATION),
+                      // should |= __kmp_ilan_topology->get_numa_mask() ?
+                      // but it is ok since thread is limited to N
+                      static_cast<kmp_uint16>(StealPolicy::FULL));
+  }
+
+
+#ifdef MOLDABILITY
+  KMP_DEBUG_ASSERT(g_routine_map.find(routine_id) != g_routine_map.end());
+  const auto &config = g_routine_map.at(routine_id).getCurrentConfig();
+  const kmp_uint16 node_mask = config.node_mask;
+  // StealPolicy::NUMA = 0, so only steal within node_mask
+  // node_mask: bitmask representing allowed NUMA nodes, and will be changed 
+  // when moldability is active (binary search)
+  const kmp_uint16 available_steal_mask =
+      config.steal_policy == StealPolicy::FULL
+          ? node_mask
+          : static_cast<kmp_uint16>(StealPolicy::NUMA); 
+#else
+  // ??? why 0 @hongguang 
+  const kmp_uint16 node_mask = 0;
+  const kmp_uint16 available_steal_mask = static_cast<kmp_uint16>(StealPolicy::FULL);
+#endif
+
+ KD_TRACE(1, ("__kmp_get_policy_info: policy info for:"
+                "\n\troutine %p,"
+                "\n\tteam size=%d,"
+                "\n\tnode_mask=0x%x,"
+                "\n\tavailable_steal_mask=0b%s."
+                "\n",
+               routine_id, 
+               thread->th.th_team_nproc,
+               node_mask, 
+               std::bitset<16>(available_steal_mask).to_string().c_str()));
+
+  return PolicyInfo(node_mask, available_steal_mask);
+}
+
+
+
+
 ///
 /// @brief This function returns the base node of the NUMA node
 /// containing the processor corresponding to tid.
@@ -121,7 +172,7 @@ Schedule::__kmp_select_thread_data_queue(kmp_task_team *task_team,
         ilan_numa_master_thread, thread_data, available_steal);
   }
 
-  KA_TRACE(3, ("%s:%d: __kmp_optimal_thread: Base NUMA thread tid=%d\n ",
+  KD_TRACE(3, ("%s:%d: __kmp_optimal_thread: Base NUMA thread tid=%d\n ",
                __FILE_NAME__, __LINE__, taskdata->td_task_place_tid));
   return thread_data;
 }
@@ -157,7 +208,7 @@ void Schedule::__kmp_set_task_affinity(kmp_info *thread,
   // When single thread is executing
   // ? when would this happen ?
   if (nthreads == 1) {
-    KA_TRACE(1, ("%s:%d: __kmp_set_task_affinity: Single thread, "
+    KD_TRACE(1, ("%s:%d: __kmp_set_task_affinity: Single thread, "
                  "set default affinity for routine %p\n",
                  __FILE_NAME__, __LINE__, routine_id));
     // if you are confused, read the example following this section first.
@@ -234,7 +285,7 @@ void Schedule::__kmp_set_task_affinity(kmp_info *thread,
       
   taskdata->td_available_steal = policyInfo.available_steal_mask;
 
-  KA_TRACE(3, ("%s:%d: __kmp_set_task_affinity: for routine %p: Nthreads=%d, "
+  KD_TRACE(3, ("%s:%d: __kmp_set_task_affinity: for routine %p: Nthreads=%d, "
                "Nnuma=%d, "
                "numaid=%d,"
                "bucketSize=%lu "
@@ -277,7 +328,7 @@ void Schedule::__kmp_set_start_head(kmp_task_team_t *task_team,
   KMP_DEBUG_ASSERT(threads_data != NULL);
   thread->th.has_execed_on_self = 0;
   thread->th.numa_head_start = threads_data->td.td_deque_head;
-  KA_TRACE(2, ("__kmp_set_start_head: Thread tid=%d , master_numa_tid=%d, "
+  KD_TRACE(2, ("__kmp_set_start_head: Thread tid=%d , master_numa_tid=%d, "
                "numa_head_start=%u\n",
                tid, numa_base_tid, thread->th.numa_head_start));
 }
@@ -310,49 +361,15 @@ Schedule::__kmp_get_load_balance_mask(kmp_info_t *thread,
 }
 
 
-///
-/// @brief This function performs the logical thread pinning to physical
-/// cores and sets up NUMA specific variables for the thread.
-/// @note This is required for the performance montoring in kmp_ilan_perf.cpp
-///
-// void Schedule::__kmp_set_per_thread_affinity(kmp_info *thread, int32_t gtid) {
-  // kmp_team_t *team = thread->th.th_team;
-  // int32_t nthreads = team->t.t_nproc;
-  // int place = __kmp_tid_from_gtid(gtid);
-
-  // if (thread->th.th_affin_mask == NULL) {
-  //   KA_TRACE(5, ("Alloc: T#%d\n", gtid));
-  //   KMP_CPU_ALLOC(thread->th.th_affin_mask);
-  // } else {
-  //   KA_TRACE(5, ("Setting zero: T#%d\n", gtid));
-  //   KMP_CPU_ZERO(thread->th.th_affin_mask);
-  // }
-  // KMP_CPU_SET(place, thread->th.th_affin_mask);
-
-  // thread->th.th_current_place = place;
-  // thread->th.th_new_place = place;
-  // thread->th.th_last_place = nthreads - 1;
-  // thread->th.force_affin = 1;
-
-  // const auto numaId =
-  //     static_cast<kmp_uint8>(place) / (ILAN::__kmp_ilan_topology().get_num_pus() /
-  //                                      ILAN::__kmp_ilan_topology().get_num_numa());
-  // // This thread is allowed to steal tasks with matching mask
-  // thread->th.steal_mask =
-  //     (1U << numaId) |
-  //     static_cast<kmp_uint16>(StealPolicy::FULL); // All threads can steal tasks
-  //                                                 // with load balance bit
-// }
-
 
 static void print_routine_map() {
-  KA_TRACE(1, ("---- Routine Map START ----\n"));
+  KD_TRACE(1, ("---- Routine Map START ----\n"));
   for (const auto &pair : g_routine_map) {
     const auto &routine_id = pair.first;
     const auto &routine = pair.second;
-    KA_TRACE(1, ("\tRoutine %p:\n", routine_id));
+    KD_TRACE(1, ("\tRoutine %p:\n", routine_id));
   }
-  KA_TRACE(1, ("----  Routine Map END ----\n"));
+  KD_TRACE(1, ("----  Routine Map END ----\n"));
 }
 
 
@@ -361,7 +378,7 @@ static void print_routine_map() {
 ///
 void Schedule::__kmp_store_routine_stats(kmp_team *team, kmp_int64 routine_id) {
   if (team->t.t_nproc == 1) {
-    KA_TRACE(
+    KD_TRACE(
         1,
         ("__kmp_store_routine_stats: Only 1 thread, do not store stats. %p\n",
          routine_id));
@@ -376,7 +393,7 @@ void Schedule::__kmp_store_routine_stats(kmp_team *team, kmp_int64 routine_id) {
   Perf::__kmp_get_taskloop_stats(team, stats, taskloop_start_time);
 
   if(g_routine_map.find(routine_id) == g_routine_map.end()) {
-    KA_TRACE(1, ("__kmp_store_routine_stats: "
+    KD_TRACE(1, ("__kmp_store_routine_stats: "
       "cannot find routine %p in map, adding it now.\n",
                  routine_id));
 
@@ -389,7 +406,7 @@ void Schedule::__kmp_store_routine_stats(kmp_team *team, kmp_int64 routine_id) {
   // Verify that the routine exists in the map
   KMP_DEBUG_ASSERT(g_routine_map.find(routine_id) != g_routine_map.end());
 
-  KA_TRACE(1, ("__kmp_store_routine_stats: New stat store for routine %p\n",
+  KD_TRACE(1, ("__kmp_store_routine_stats: New stat store for routine %p\n",
                routine_id));
 
   // Store the execution stats
@@ -406,7 +423,7 @@ routine_config Schedule::__kmp_select_config(kmp_info *thread) {
 
   if (thread->th.th_team_nproc == 1) {
     // @todo hongguang: I don't know when th_team_nproc can be 1 here.
-    KA_TRACE(1, ("__kmp_store_routine_stats: Select default "
+    KD_TRACE(1, ("__kmp_store_routine_stats: Select default "
                  "config={1,10,255,TASK_GEN}\n"));
     return routine_config{1,   // num_threads
                           10,  // num_tasks
@@ -433,7 +450,7 @@ routine_config Schedule::__kmp_select_config(kmp_info *thread) {
     ret_config = g_routine_map.at(routine_id).getNextConfig();
   }
 
-  KA_TRACE(1,
+  KD_TRACE(1,
            ("__kmp_select_config: routine %p was given new \n"
             "\tconfig={\n"
             "\t\t num threads:%d\n"
@@ -450,43 +467,7 @@ routine_config Schedule::__kmp_select_config(kmp_info *thread) {
   return ret_config;
 }
 
-///
-/// @brief Returns the info about the policy selected for the current routine.
-///
-Schedule::PolicyInfo Schedule::__kmp_get_policy_info(kmp_info *thread,
-                                                     kmp_int64 routine_id) {
-  if (thread->th.th_team_nproc == 1) {
-    // todo:@hongguang: I don't get it.  // ? omp single ? omp master?
-    KA_TRACE(1, ("__kmp_get_policy_info: Single thread, "
-                 "return default policy info: (GENERATION, FULL)\n"));
-    return PolicyInfo(static_cast<kmp_uint16>(StealPolicy::TASK_GENERATION),
-                      // should |= __kmp_ilan_topology->get_numa_mask() ?
-                      // but it is ok since thread is limited to N
-                      static_cast<kmp_uint16>(StealPolicy::FULL));
-  }
 
-  KA_TRACE(1, ("__kmp_get_policy_info: Getting policy info for routine %p, team size=%d\n",
-               routine_id, thread->th.th_team_nproc));
-
-#ifdef MOLDABILITY
-  KMP_DEBUG_ASSERT(g_routine_map.find(routine_id) != g_routine_map.end());
-  const auto &config = g_routine_map.at(routine_id).getCurrentConfig();
-  const kmp_uint16 node_mask = config.node_mask;
-  // StealPolicy::NUMA = 0, so only steal within node_mask
-  // node_mask: bitmask representing allowed NUMA nodes, and will be changed 
-  // when moldability is active (binary search)
-  const kmp_uint16 available_steal =
-      config.steal_policy == StealPolicy::FULL
-          ? node_mask
-          : static_cast<kmp_uint16>(StealPolicy::NUMA); 
-#else
-  // ??? why 0 @hongguang 
-  const kmp_uint16 node_mask = 0;
-  const kmp_uint16 available_steal = static_cast<kmp_uint16>(StealPolicy::FULL);
-#endif
-
-  return PolicyInfo(node_mask, available_steal);
-}
 
 ///
 /// @brief Start the timer for the current routine.

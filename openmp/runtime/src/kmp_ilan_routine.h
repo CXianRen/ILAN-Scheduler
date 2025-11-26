@@ -32,11 +32,22 @@ when using FULL steal policy:
 */
 
 enum class StealPolicy : kmp_uint16 {
-  NUMA = 0,                         // 0000 0000 0000 0000
+  NUMA = 0,                         // 0000 0000 0000 0000 
   SOCKET = 1,                       // 0000 0000 0000 0001 (never used)
   FULL = (1U << 15),                // 1000 0000 0000 0000
   TASK_GENERATION = (1U << 16) - 1  // 1111 1111 1111 1111
 };
+
+inline const char* toString(StealPolicy policy) {
+  switch (policy) {
+    case StealPolicy::NUMA: return "NUMA";
+    case StealPolicy::SOCKET: return "SOCKET";
+    case StealPolicy::FULL: return "FULL";
+    case StealPolicy::TASK_GENERATION: return "TASK_GENERATION";
+    default: return "UNKNOWN";
+  }
+}
+
 
 struct routine_config {
   // number of threads used to execute the routine
@@ -46,6 +57,7 @@ struct routine_config {
   // bitmask of NUMA nodes used
   kmp_uint16 node_mask;
 
+  // for scheduler
   StealPolicy steal_policy;
 
   bool operator==(const routine_config &other) const {

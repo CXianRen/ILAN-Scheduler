@@ -9,6 +9,7 @@
 #include <bitset>
 #include <cfloat>
 #include <climits>
+#include <limits>
 
 namespace {
 routine_config UNDEFINED_CONFIG = {-1, -1, 0, StealPolicy::NUMA};
@@ -20,7 +21,7 @@ kmp_int64 getMin(kmp_int64 a, kmp_int64 b) { return a < b ? a : b; }
 void printStatsArray(routine_stats_nodes arr) {
   auto i = 0;
   for (const auto &stat : arr) {
-    KA_TRACE(1, ("Node[%d] ExecT:%f \n", i, stat.execution_time));
+    KC_TRACE(1, ("Node[%d] ExecT:%f \n", i, stat.execution_time));
     i++;
   }
 }
@@ -40,13 +41,36 @@ Routine::Routine(kmp_int64 routine_id, kmp_uint32 nthreads)
       m_2ndfastest(UNDEFINED_CONFIG),
       m_search_finished(false), 
       m_iteration_count(0),
-      MOLDABILITY_GRANULARITY(ILAN::__kmp_ilan_topology().get_numa_size()) {}
+      MOLDABILITY_GRANULARITY(ILAN::__kmp_ilan_topology().get_numa_size()) {
+  KC_TRACE(1, ("Routine::Routine(): \nCreated routine %p with initial config:{"
+               "\n\tnthreads=%d,"
+               "\n\tntasks=%d,"
+               "\n\tmask=%s,"
+               "\n\tsteal_policy=%s"
+               "\n\tmodability granularity=%d\n}\n"
+               ,
+               m_routine_id,
+               m_current_config.num_threads,
+               m_current_config.num_tasks,
+               std::bitset<16>(m_current_config.node_mask).to_string().c_str(),
+               std::bitset<16>(
+                  static_cast<kmp_uint16>(m_current_config.steal_policy)
+               ).to_string().c_str(),
+               MOLDABILITY_GRANULARITY));
+}
 
 
 ///
 /// @brief Sets up and returns the initial config. This config
 /// is used for the first iteration of the taskloop.
 /// nthreads: size of the team
+/// initial config:
+///    num_threads: nthreads
+///    num_tasks: default OpenMP heuristic (nthreads * 10)
+///    node_mask: all available NUMA nodes
+///    steal_policy: NUMA
+///
+
 routine_config Routine::getInitialConfig(kmp_uint32 nthreads) {
   routine_config config;
   config.num_threads = nthreads;
@@ -83,7 +107,7 @@ routine_config Routine::getInitialConfig(kmp_uint32 nthreads) {
         }
       }
     }
-     KA_TRACE(1, ("Routine::getInitialConfig(): Undersubscription case, "
+    KC_TRACE(1, ("Routine::getInitialConfig(): Undersubscription case, "
                  "adjusted node mask from 0x%x to 0x%x for %d threads.\n",
                  config.node_mask, new_mask, nthreads));
                  
@@ -104,14 +128,14 @@ void Routine::initBinarySearch() {
   if (m_current_config.num_threads >= MOLDABILITY_GRANULARITY * 2) {
 
     m_current_config.num_threads = m_current_config.num_threads / 2;
-    KA_TRACE(
+    KC_TRACE(
         1, ("Routine::initBinarySearch(): Only one previous config."
             " Try half the number of threads (%d threads/2) for routine %p .\n",
             m_current_config.num_threads, m_routine_id));
     return;
   }
 
-  KA_TRACE(1, ("Routine::initBinarySearch(): Binary search not possible: To "
+  KC_TRACE(2, ("Routine::initBinarySearch(): Binary search not possible: To "
                "few NUMA nodes\n"));
   m_search_finished = true;
   m_1stfastest = m_current_config;
@@ -126,7 +150,7 @@ void Routine::binarySearch() {
   kmp_real64 fastest1st_time = calcSlowestNUMAExec(m_1stfastest);
   kmp_real64 fastest2nd_time = calcSlowestNUMAExec(m_2ndfastest);
 
-  KA_TRACE(3, ("\nRoutine::binarySearch():"
+  KC_TRACE(3, ("\nRoutine::binarySearch():"
                " Comparing old configs for routine %p. \n"
                "Fastest config={%d, %d, %d} execT=%f, "
                " Second fastest={%d, %d, %d} execT=%f.\n",
@@ -169,7 +193,7 @@ void Routine::binarySearch() {
     m_search_finished = true;
     m_current_config = m_1stfastest;
 
-    KA_TRACE(
+    KC_TRACE(
         3,
         ("Routine::binarySearch(): Search finished. Select fastest config.\n"));
   }
@@ -184,7 +208,7 @@ void Routine::binarySearch() {
       m_current_config.num_threads = next_num_threads;
     }
 
-    KA_TRACE(3, ("Routine::binarySearch(): Selecting new config"
+    KC_TRACE(3, ("Routine::binarySearch(): Selecting new config"
                  " based on thread diff: %d, new number of threads: %d.\n",
                  diff_threads, m_current_config.num_threads));
   }
@@ -230,7 +254,7 @@ const routine_config &Routine::getNextConfig() {
   // } else {
   //   // If two or more previous configs, try a config inbetween the two fastest
   //   // configs
-  //   KA_TRACE(1, ("Routine::getNextConfig(): binarySearch\n"));
+  //   KC_TRACE(1, ("Routine::getNextConfig(): binarySearch\n"));
   //   binarySearch(); // will update m_current_config
   // }
 
@@ -255,7 +279,7 @@ const routine_config &Routine::getNextConfig() {
 
       default: {
         // try a config inbetween the two fastest configs 
-        KA_TRACE(1, ("Routine::getNextConfig(): binarySearch\n"));
+        KC_TRACE(2, ("Routine::getNextConfig(): binarySearch\n"));
         binarySearch(); // will update m_current_config
       } break;
     }
@@ -266,7 +290,7 @@ const routine_config &Routine::getNextConfig() {
   m_current_config.num_tasks = m_current_config.num_threads * 10;
 
   // Determine NUMA node placement
-  KA_TRACE(1, ("Routine::getNextConfig(): Getting NUMA mask for routine %p\n",
+  KC_TRACE(2, ("Routine::getNextConfig(): Getting NUMA mask for routine %p\n",
                m_routine_id));
   m_current_config.node_mask = getNUMAMask();
 
@@ -277,7 +301,7 @@ const routine_config &Routine::getNextConfig() {
     }
   #endif
 
-  KA_TRACE(1, ("Routine::getNextConfig(): Routine %p was given config: "
+  KC_TRACE(2, ("Routine::getNextConfig(): Routine %p was given config: "
                "{nthreads=%d, ntasks=%d, mask=%s, steal_policy=%d} .\n",
                m_routine_id, m_current_config.num_threads,
                m_current_config.num_tasks,
@@ -296,8 +320,9 @@ const routine_config &Routine::getNextConfig() {
 // often with cold cache, and not representative
 void Routine::storeExecution(routine_stats_nodes stats) {
   if (m_iteration_count == 0) {
-    KA_TRACE(1, ("Routine::storeExecution(): First execution discarded "
+    KC_TRACE(1, ("Routine::storeExecution(): m_iteraion: %d \n\t First execution discarded "
                  "(routine %p)\n",
+                 m_iteration_count,
                  m_routine_id));
     return;
   }
@@ -310,7 +335,7 @@ void Routine::storeExecution(routine_stats_nodes stats) {
   // for (const auto &stat : stats) {
   //   if (((1U << i) & mask) == 0 && (stat.execution_time != 0)) {
   //     auto tmp = std::bitset<16>(m_current_config.node_mask);
-  //     KA_TRACE(1, ("Routine::storeExecution(): Node mask = 0b%s. Stat non zero "
+  //     KC_TRACE(1, ("Routine::storeExecution(): Node mask = 0b%s. Stat non zero "
   //                  "for node [%d] "
   //                  "(routine %p)\n",
   //                  tmp.to_string().c_str(), i, m_routine_id));
@@ -323,8 +348,9 @@ void Routine::storeExecution(routine_stats_nodes stats) {
   if (m_execution_history.find(m_current_config) == m_execution_history.end()) {
     m_execution_history.emplace(m_current_config, stats);
 
-    KA_TRACE(1, ("Routine:storeExecution: routine %p inserted new config={%d, "
+    KC_TRACE(1, ("Routine:storeExecution[new]: m_iteraion: %d \n\t routine %p inserted new config={%d, "
                  "%d, %d}\n",
+                 m_iteration_count,
                  m_routine_id, 
                  m_current_config.num_threads,
                  m_current_config.num_tasks,
@@ -332,8 +358,9 @@ void Routine::storeExecution(routine_stats_nodes stats) {
 
   } else {
 
-    KA_TRACE(1, ("Routine:storeExecution: routine %p has new stats for "
+    KC_TRACE(1, ("Routine:storeExecution[update]: m_iteraion: %d \n\t routine %p has new stats for "
                  "config={%d, %d, %d}.\n",
+                  m_iteration_count,
                  m_routine_id, m_current_config.num_threads,
                  m_current_config.num_tasks,
                  static_cast<int>(m_current_config.steal_policy)));
@@ -343,19 +370,37 @@ void Routine::storeExecution(routine_stats_nodes stats) {
   }
   printStatsArray(stats);
 
-  if (m_1stfastest.num_threads == -1 ||
-      isXFasterThanY(m_current_config, m_1stfastest)) {
+  kmp_real64 new_time = calcSlowestNUMAExec(m_current_config);
+  kmp_real64 fastest = std::numeric_limits<kmp_real64>::max();
+  kmp_real64 second_fastest = std::numeric_limits<kmp_real64>::max();
+
+  // if m_1stfastest or m_2ndfastest is uninitialized
+  if (m_1stfastest.num_threads != -1) {
+    fastest = calcSlowestNUMAExec(m_1stfastest);
+  }
+
+  if (m_2ndfastest.num_threads != -1){
+    second_fastest = calcSlowestNUMAExec(m_2ndfastest);
+  }
+
+  if (new_time < fastest) {
     KMP_DEBUG_ASSERT(!(m_current_config == m_1stfastest));
-    KA_TRACE(1, ("Routine::storeExecution: Updating fastest configs\n"));
+    KC_TRACE(1, ("Routine::storeExecution[fast]: "
+                "Updating fastest configs\n\t"
+                "current fast: %.6f new: %.6f\n", 
+                (fastest==std::numeric_limits<kmp_real64>::max()?-1.0:fastest), new_time));
     m_2ndfastest = m_1stfastest;
     m_1stfastest = m_current_config;
-  } else if (m_2ndfastest.num_threads == -1 ||
-             isXFasterThanY(m_current_config, m_2ndfastest)) {
+  } else if (new_time < second_fastest) {
     KMP_DEBUG_ASSERT(!(m_current_config == m_2ndfastest));
-    KA_TRACE(1, ("Routine::storeExecution: Updating 2nd fastest config\n"));
+    KC_TRACE(1, ("Routine::storeExecution[2nd]: "
+                 "Updating 2nd fastest config\n\t"
+                 "current second: %.6f new: %.6f\n", 
+                 (second_fastest==std::numeric_limits<kmp_real64>::max()?-1.0:second_fastest), new_time));
     m_2ndfastest = m_current_config;
   }
 }
+
 ///
 /// @brief Calculates the slowest execution time among all NUMA nodes for a
 /// certain config
@@ -438,10 +483,10 @@ kmp_uint16 Routine::getNUMAMask() const {
   // not the id of the node, but the index in stats array,
   // also the bit index in node_mask
   auto fastest_index = std::distance(stats.begin(), min_iter);
-  KA_TRACE(1, ("Routine::getNUMAMask(): Fastest index = %d\n", fastest_index));
+  KC_TRACE(2, ("Routine::getNUMAMask(): Fastest index = %d\n", fastest_index));
 
   auto fastest_numa_id = ILAN::__kmp_ilan_topology().get_numa_id_from_index(fastest_index);
-  KA_TRACE(1, ("Routine::getNUMAMask(): Fastest NUMA ID = %d\n", fastest_numa_id));
+  KC_TRACE(2, ("Routine::getNUMAMask(): Fastest NUMA ID = %d\n", fastest_numa_id));
 
   // Step 3: Calculate how many NUMA nodes we need
   // Example: If we need 24 threads and NUMA_SIZE = 8
@@ -457,7 +502,7 @@ kmp_uint16 Routine::getNUMAMask() const {
   // we already have one fastest node
   numaCount = numaCount - 1;
           
-  KA_TRACE(1, ("Routine::getNUMAMask(): Need total %d NUMA nodes, "
+  KC_TRACE(2, ("Routine::getNUMAMask(): Need total %d NUMA nodes, "
                "selecting %d additional nodes.\n",
                numaCount + 1, numaCount));
   KMP_DEBUG_ASSERT(numaCount >= 0);
@@ -481,7 +526,7 @@ kmp_uint16 Routine::getNUMAMask() const {
     if (((1U << current_numa_id) & mask) == 0) {
       mask |= 1U << current_numa_id;
       numaCount--;
-      KA_TRACE(1, ("Routine::getNUMAMask(): Added NUMA ID %d (index %d) to mask\n", 
+      KC_TRACE(2, ("Routine::getNUMAMask(): Added NUMA ID %d (index %d) to mask\n", 
                    current_numa_id, current_index));
     }
     
@@ -489,7 +534,7 @@ kmp_uint16 Routine::getNUMAMask() const {
     current_index = (current_index + 1) % ILAN::__kmp_ilan_topology().get_num_numa();
   }
 
-  KA_TRACE(1, ("Routine::getNUMAMask(): Final mask = 0x%x\n", mask));
+  KC_TRACE(2, ("Routine::getNUMAMask(): Final mask = 0x%x\n", mask));
   return mask;
 }
 
@@ -521,7 +566,7 @@ StealPolicy Routine::checkLoadBalance() {
     policy = StealPolicy::FULL;
   }
 
-  KA_TRACE(1, ("Routine::checkLoadbalance(): Policy %d selected for routine "
+  KC_TRACE(2, ("Routine::checkLoadbalance(): Policy %d selected for routine "
                "%p. Fastest:%f, "
                "Slowest:%f, diff:%f\n",
                policy, m_routine_id, fastest, slowest, diff))

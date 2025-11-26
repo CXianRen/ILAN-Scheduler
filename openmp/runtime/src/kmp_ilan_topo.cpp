@@ -151,8 +151,8 @@ void ILANTopology::showTopo() const {
               num_sockets_, num_numa_, num_cores_,
                total_num_sockets_, total_num_numa_, total_num_cores_));
   // print bitmask
-  KA_TRACE(1, ("    - ILAN NUMA mask: 0x%llx\n", ilan_numa_set_));
-  KA_TRACE(1, ("    - ILAN  CPU mask: 0x%llx\n", ilan_cpu_set_));
+  KA_TRACE(1, ("    - ILAN NUMA mask: 0x%02llx\n", ilan_numa_set_));
+  KA_TRACE(1, ("    - ILAN  CPU mask: 0x%016llx\n", ilan_cpu_set_));
   // print numa to os ids map
   for (const auto& entry : numa_id_to_os_ids_) {
     kmp_uint32 numa_id = entry.first;
